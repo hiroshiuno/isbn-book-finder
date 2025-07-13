@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISBN 書籍情報取得アプリ for Excel</title>
+    <style>
+        /* 全体のスタイル設定 */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+            margin: 0;
+            padding: 2em;
+            background-color: #f8f9fa;
+            color: #212529;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 1200px;
+            width: 100%;
+            background: white;
+            padding: 2em;
+            border-radius: 12px;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #343a40;
+            border-bottom: 3px solid #0d6efd;
+            padding-bottom: 0.5em;
+            margin-top: 0;
+            font-size: 1.8rem;
+        }
+        p {
+            line-height: 1.6;
+        }
+        /* テキスト入力エリアのスタイル */
+        textarea {
+            width: 100%;
+            box-sizing: border-box; /* paddingとborderを幅に含める */
+            height: 220px;
+            margin-bottom: 1em;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #ced4da;
+            font-size: 1rem;
+            resize: vertical; /* 縦方向のリサイズのみ許可 */
+        }
+        textarea:focus {
+            border-color: #86b7fe;
+            outline: 0;
+            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+        }
+        /* 操作ボタンとステータス表示のスタイル */
+        .controls {
+            margin-top: 1em;
+            display: flex;
+            flex-wrap: wrap; /* 画面が狭い場合に折り返し */
+            gap: 1em;
+            align-items: center;
+        }
+        button {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: all 0.2s ease-in-out;
+            white-space: nowrap; /* ボタン内のテキストが折り返さないように */
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        #submit-btn {
+            background-color: #0d6efd;
+            color: white;
+        }
+        #submit-btn:hover:not(:disabled) {
+            background-color: #0b5ed7;
+            transform: translateY(-2px);
+        }
+        #copy-btn {
+            background-color: #198754;
+            color: white;
+        }
+        #copy-btn:hover:not(:disabled) {
+            background-color: #157347;
+            transform: translateY(-2px);
+        }
+        /* 読み込み中スピナーのスタイル */
+        .spinner {
+            display: none;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #0d6efd;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* ステータスメッセージのスタイル */
+        #status-message {
+            font-weight: bold;
+        }
+        .success { color: #198754; }
+        .error { color: #dc3545; }
+        /* 結果表示テーブルのスタイル */
+        .table-container {
+            width: 100%;
+            overflow-x: auto; /* テーブルがはみ出す場合に横スクロール */
+            margin-top: 2em;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        th, td {
+            border: 1px solid #dee2e6;
+            padding: 12px;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            background-color: #e9ecef;
+            position: sticky;
+            top: 0;
+            z-index: 1; /* スクロール時に他の要素より手前に表示 */
+        }
+        /* 非表示用クラス */
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ISBN 書籍情報取得アプリ 📚</h1>
+        <p>
+            下のテキストエリアにISBN番号を1行に1つずつ入力してください。<br>
+            ハイフンの有無は問いません。入力後、「書籍情報を取得」ボタンを押してください。
+        </p>
+        
+        <textarea id="isbns-input" placeholder="例:&#10;978-4-297-13822-9&#10;9784873119045&#10;978-4-00-310101-8"></textarea>
+        
+        <div class="controls">
+            <button id="submit-btn">書籍情報を取得</button>
+            <button id="copy-btn" class="hidden">📋 クリップボードにコピー (Excel用)</button>
+            <div id="spinner" class="spinner"></div>
+            <span id="status-message"></span>
+        </div>
+
+        <div id="result-container" class="hidden table-container">
+            <table id="result-table">
+                <thead>
+                    <!-- --- 修正箇所 START: 列の順序と項目を元に戻す --- -->
+                    <tr>
+                        <th>書名</th>
+                        <th>巻冊次</th>
+                        <th>著者名</th>
+                        <th>出版者</th>
+                        <th>出版年</th>
+                        <th>ISBN</th>
+                        <th>金額(本体価格)</th>
+                    </tr>
+                    <!-- --- 修正箇所 END --- -->
+                </thead>
+                <tbody>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // HTML要素を取得
+        const submitBtn = document.getElementById('submit-btn');
+        const copyBtn = document.getElementById('copy-btn');
+        const isbnsInput = document.getElementById('isbns-input');
+        const tableBody = document.querySelector('#result-table tbody');
+        const resultContainer = document.getElementById('result-container');
+        const statusMessage = document.getElementById('status-message');
+        const spinner = document.getElementById('spinner');
+
+        // 「書籍情報を取得」ボタンがクリックされたときの処理
+        submitBtn.addEventListener('click', async () => {
+            const isbns = isbnsInput.value.split('\n')
+                .map(isbn => isbn.replace(/-/g, '').trim())
+                .filter(isbn => isbn.length > 0);
+
+            if (isbns.length === 0) {
+                alert('ISBNを入力してください。');
+                return;
+            }
+
+            uiResetForFetch();
+
+            try {
+                const apiUrl = `https://api.openbd.jp/v1/get?isbn=${isbns.join(',')}`;
+                const response = await fetch(apiUrl);
+
+                if (!response.ok) {
+                    throw new Error(`APIサーバーエラー: ${response.statusText}`);
+                }
+
+                const booksData = await response.json();
+                displayResults(booksData, isbns);
+
+            } catch (error) {
+                console.error('取得エラー:', error);
+                updateStatus('情報の取得中にエラーが発生しました。', 'error');
+            } finally {
+                spinner.style.display = 'none';
+                submitBtn.disabled = false;
+            }
+        });
+
+        // 「クリップボードにコピー」ボタンがクリックされたときの処理
+        copyBtn.addEventListener('click', () => {
+            let clipboardText = '';
+            const rows = tableBody.querySelectorAll('tr');
+            
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td');
+                const rowData = Array.from(cells).map(cell => {
+                    return cell.textContent.replace(/[\n\t]/g, ' ');
+                });
+                clipboardText += rowData.join('\t') + '\n';
+            });
+
+            const textArea = document.createElement("textarea");
+            textArea.value = clipboardText;
+            textArea.style.position = 'fixed';
+            textArea.style.top = '-9999px';
+            textArea.style.left = '-9999px';
+
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    updateStatus('クリップボードにコピーしました！ Excelに貼り付けられます。', 'success');
+                    setTimeout(() => {
+                        if (statusMessage.textContent.includes('コピーしました')) {
+                            updateStatus('', '');
+                        }
+                    }, 5000);
+                } else {
+                    throw new Error('Copy command was not successful.');
+                }
+            } catch (err) {
+                console.error('コピー失敗: ', err);
+                updateStatus('クリップボードへのコピーに失敗しました。', 'error');
+            }
+
+            document.body.removeChild(textArea);
+        });
+
+        function uiResetForFetch() {
+            tableBody.innerHTML = '';
+            updateStatus('', '');
+            copyBtn.classList.add('hidden');
+            resultContainer.classList.add('hidden');
+            spinner.style.display = 'block';
+            submitBtn.disabled = true;
+        }
+
+        function displayResults(booksData, originalIsbns) {
+            let foundCount = 0;
+            booksData.forEach((book, index) => {
+                const requestedIsbn = originalIsbns[index];
+                
+                if (book === null) {
+                    const row = tableBody.insertRow();
+                    // --- 修正箇所 START: 「見つかりません」表示の列数を変更 ---
+                    row.innerHTML = `
+                        <td>書籍情報が見つかりません</td>
+                        <td></td>
+                        <td></td>
+                        <td></td>
+                        <td></td>
+                        <td>${requestedIsbn}</td>
+                        <td></td>
+                    `;
+                    // --- 修正箇所 END ---
+                    return;
+                }
+                
+                foundCount++;
+                const summary = book.summary || {};
+                const onix = book.onix || {};
+
+                const title = summary.title || '情報なし';
+                const volume = onix.DescriptiveDetail?.TitleDetail?.TitleElement?.PartNumber || '';
+                const authors = summary.author || '情報なし';
+                const publisher = summary.publisher || '情報なし';
+                const pubdate = summary.pubdate || '';
+                const year = pubdate.length >= 4 ? pubdate.substring(0, 4) : '';
+                const isbnFromApi = summary.isbn || requestedIsbn;
+
+                let price = '情報なし';
+                const priceList = onix.ProductSupply?.SupplyDetail?.Price;
+                if (Array.isArray(priceList)) {
+                    const mainPrice = priceList.find(p => p.PriceTypeCode === '01');
+                    if (mainPrice) {
+                        price = mainPrice.PriceAmount;
+                    } else if (priceList.length > 0) {
+                        price = priceList[0].PriceAmount || '情報なし';
+                    }
+                }
+
+                const row = tableBody.insertRow();
+                // --- 修正箇所 START: セルを追加する順序を元に戻す ---
+                row.insertCell().textContent = title;
+                row.insertCell().textContent = volume;
+                row.insertCell().textContent = authors;
+                row.insertCell().textContent = publisher;
+                row.insertCell().textContent = year;
+                row.insertCell().textContent = isbnFromApi;
+                row.insertCell().textContent = price;
+                // --- 修正箇所 END ---
+            });
+
+            if (foundCount > 0) {
+                resultContainer.classList.remove('hidden');
+                copyBtn.classList.remove('hidden');
+                updateStatus(`${foundCount}件の情報を取得しました。`, 'success');
+            } else {
+                updateStatus('有効な書籍情報が見つかりませんでした。', 'error');
+            }
+        }
+
+        function updateStatus(message, type) {
+            statusMessage.textContent = message;
+            statusMessage.className = type;
+        }
+    </script>
+</body>
+</html>
